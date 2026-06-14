@@ -1,26 +1,9 @@
 "use client";
 
-import React, {
-  useState,
-  useRef,
-  useEffect,
-  ChangeEvent,
-  MouseEvent as ReactMouseEvent,
-} from "react";
+import React, { useState, useRef, useEffect } from "react";
 import SignaturePopup from "../components/SignaturePopup";
 
-type Box = {
-  id: number;
-  fieldType: "signature" | "text" | "image" | "date" | "radio";
-  xPercent: number;
-  yPercent: number;
-  wPercent: number;
-  hPercent: number;
-  signature?: string | null;
-  value?: string;
-};
-
-const FIELD_LABELS: Record<Box["fieldType"], string> = {
+const FIELD_LABELS = {
   signature: "Signature",
   text: "Text",
   image: "Image",
@@ -28,7 +11,7 @@ const FIELD_LABELS: Record<Box["fieldType"], string> = {
   radio: "Radio",
 };
 
-const buttonStyle: React.CSSProperties = {
+const buttonStyle = {
   padding: "6px 12px",
   borderRadius: "4px",
   border: "none",
@@ -41,17 +24,14 @@ const buttonStyle: React.CSSProperties = {
 // ---------------------------------------------------------------------------
 // Lazy-load pdfjs-dist (client-only, singleton)
 // ---------------------------------------------------------------------------
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _pdfjsLib: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _pdfjsLoading: Promise<any> | null = null;
+let _pdfjsLib = null;
+let _pdfjsLoading = null;
 
 async function getPdfJs() {
   if (_pdfjsLib) return _pdfjsLib;
   if (_pdfjsLoading) return _pdfjsLoading;
 
   _pdfjsLoading = import("pdfjs-dist").then((lib) => {
-    // Use the CDN worker — most reliable option in Next.js
     lib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${lib.version}/build/pdf.worker.min.mjs`;
     _pdfjsLib = lib;
     return lib;
@@ -62,33 +42,30 @@ async function getPdfJs() {
 
 // ---------------------------------------------------------------------------
 
-function PdfViewer() {
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
+export default function PdfViewer() {
+  const [pdfFile, setPdfFile] = useState(null);
   const [hasPdf, setHasPdf] = useState(false);
-  const [boxes, setBoxes] = useState<Box[]>([]);
-  const [activeBoxId, setActiveBoxId] = useState<number | null>(null);
+  const [boxes, setBoxes] = useState([]);
+  const [activeBoxId, setActiveBoxId] = useState(null);
 
-  const [originalHash, setOriginalHash] = useState<string | null>(null);
-  const [signedHash, setSignedHash] = useState<string | null>(null);
-  const [pdfId, setPdfId] = useState<string | null>(null);
+  const [originalHash, setOriginalHash] = useState(null);
+  const [signedHash, setSignedHash] = useState(null);
+  const [pdfId, setPdfId] = useState(null);
 
   const [isSigning, setIsSigning] = useState(false);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
 
-  // The div that wraps the canvas + overlay boxes
-  const pdfAreaRef = useRef<HTMLDivElement | null>(null);
-  // The canvas where the PDF page is rendered
-  const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  const draggingBoxIdRef = useRef<number | null>(null);
-  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const pdfAreaRef = useRef(null);
+  const pdfCanvasRef = useRef(null);
+  const draggingBoxIdRef = useRef(null);
+  const dragOffsetRef = useRef({ x: 0, y: 0 });
 
   // ---------------------------------------------------------------------------
   // Render PDF page 1 to canvas using pdfjs-dist
-  // This gives a pixel-perfect render at the correct aspect ratio so that
-  // the box percentage coordinates map exactly to the PDF coordinate space.
+  // Canvas fills 100% CSS width with auto height → exact aspect ratio of the PDF.
+  // Box percentage coords therefore map 1-to-1 with the PDF coordinate space.
   // ---------------------------------------------------------------------------
-  async function renderPdfToCanvas(file: File) {
+  async function renderPdfToCanvas(file) {
     const canvas = pdfCanvasRef.current;
     const container = pdfAreaRef.current;
     if (!canvas || !container) return;
@@ -100,13 +77,12 @@ function PdfViewer() {
       const pdfDoc = await lib.getDocument({ data: arrayBuffer }).promise;
       const page = await pdfDoc.getPage(1);
 
-      // Scale PDF page to fit the container's current CSS width at 2× for sharpness
+      // Scale to fit container width at 2× for retina sharpness
       const containerWidth = container.clientWidth || 800;
       const baseViewport = page.getViewport({ scale: 1 });
-      const scale = (containerWidth / baseViewport.width) * 2; // ×2 for retina
+      const scale = (containerWidth / baseViewport.width) * 2;
       const viewport = page.getViewport({ scale });
 
-      // Set canvas backing store size
       canvas.width = viewport.width;
       canvas.height = viewport.height;
 
@@ -126,7 +102,7 @@ function PdfViewer() {
   // ---------------------------------------------------------------------------
   // File upload
   // ---------------------------------------------------------------------------
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
 
     if (!file) {
@@ -136,7 +112,6 @@ function PdfViewer() {
       setOriginalHash(null);
       setSignedHash(null);
       setPdfId(null);
-      // Clear canvas
       const canvas = pdfCanvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext("2d");
@@ -153,20 +128,19 @@ function PdfViewer() {
     setOriginalHash(null);
     setSignedHash(null);
     setPdfId(null);
-
     renderPdfToCanvas(file);
   }
 
   // ---------------------------------------------------------------------------
   // Field boxes
   // ---------------------------------------------------------------------------
-  function addFieldBox(fieldType: Box["fieldType"]) {
+  function addFieldBox(fieldType) {
     if (!hasPdf) {
       alert("Please upload a PDF first.");
       return;
     }
 
-    const base: Box = {
+    const base = {
       id: Date.now(),
       fieldType,
       xPercent: 0.35,
@@ -183,14 +157,14 @@ function PdfViewer() {
     setBoxes((old) => [...old, base]);
   }
 
-  function deleteBox(id: number) {
+  function deleteBox(id) {
     setBoxes((old) => old.filter((b) => b.id !== id));
   }
 
   // ---------------------------------------------------------------------------
   // Dragging
   // ---------------------------------------------------------------------------
-  function handleBoxMouseDown(e: ReactMouseEvent<HTMLDivElement>, id: number) {
+  function handleBoxMouseDown(e, id) {
     e.preventDefault();
     if (!pdfAreaRef.current) return;
 
@@ -207,7 +181,7 @@ function PdfViewer() {
   }
 
   useEffect(() => {
-    function handleMouseMove(e: MouseEvent) {
+    function handleMouseMove(e) {
       const activeId = draggingBoxIdRef.current;
       if (activeId === null) return;
       if (!pdfAreaRef.current) return;
@@ -390,7 +364,6 @@ function PdfViewer() {
           padding: "8px",
           maxWidth: "800px",
           width: "100%",
-          // Only show the wrapper when a PDF has been (or is being) loaded
           display: pdfFile ? "block" : "none",
         }}
       >
@@ -400,13 +373,6 @@ function PdfViewer() {
           </p>
         )}
 
-        {/*
-          pdfAreaRef wraps both the canvas and the draggable overlays.
-          The canvas is CSS-scaled to 100% width / auto height so it always
-          matches the PDF's real aspect ratio. The overlay boxes use percentage
-          positions relative to this container — which now maps 1-to-1 with
-          the PDF page coordinates sent to the server.
-        */}
         <div
           ref={pdfAreaRef}
           style={{
@@ -415,17 +381,13 @@ function PdfViewer() {
             display: isLoadingPdf ? "none" : "block",
           }}
         >
-          {/* Canvas: backing-store set in renderPdfToCanvas, CSS fills width */}
+          {/* Canvas: pixel-perfect PDF rendering — correct aspect ratio guaranteed */}
           <canvas
             ref={pdfCanvasRef}
-            style={{
-              display: "block",
-              width: "100%",
-              height: "auto",
-            }}
+            style={{ display: "block", width: "100%", height: "auto" }}
           />
 
-          {/* Draggable field boxes */}
+          {/* Draggable field overlays */}
           {boxes.map((box) => (
             <div
               key={box.id}
@@ -460,17 +422,14 @@ function PdfViewer() {
                   input.style.display = "none";
                   document.body.appendChild(input);
                   input.onchange = (event) => {
-                    const target = event.target as HTMLInputElement;
-                    const file = target.files && target.files[0];
+                    const file = event.target.files && event.target.files[0];
                     document.body.removeChild(input);
                     if (!file) return;
                     const reader = new FileReader();
                     reader.onload = () =>
                       setBoxes((old) =>
                         old.map((b) =>
-                          b.id === box.id
-                            ? { ...b, signature: reader.result as string }
-                            : b
+                          b.id === box.id ? { ...b, signature: reader.result } : b
                         )
                       );
                     reader.readAsDataURL(file);
@@ -579,7 +538,7 @@ function PdfViewer() {
       {/* Signature drawing popup */}
       {activeBoxId !== null && (
         <SignaturePopup
-          onSave={(img: string) => {
+          onSave={(img) => {
             setBoxes((old) =>
               old.map((b) => (b.id === activeBoxId ? { ...b, signature: img } : b))
             );
@@ -591,5 +550,3 @@ function PdfViewer() {
     </main>
   );
 }
-
-export default PdfViewer;

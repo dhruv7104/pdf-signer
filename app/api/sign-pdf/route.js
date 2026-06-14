@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import crypto from "crypto";
 import mongoose, { Schema, model, models } from "mongoose";
@@ -28,41 +28,25 @@ const auditSchema = new Schema({
 
 const AuditLog = models.AuditLog || model("AuditLog", auditSchema);
 
-type BoxInput = {
-  fieldType: "signature" | "text" | "image" | "date" | "radio";
-  xPercent: number;
-  yPercent: number;
-  wPercent: number;
-  hPercent: number;
-  signature: string | null;
-  value: string;
-};
-
-export async function POST(req: NextRequest) {
+export async function POST(req) {
   try {
     const formData = await req.formData();
 
-    const file = formData.get("pdf") as File | null;
-    const boxesJson = formData.get("boxes") as string | null;
+    const file = formData.get("pdf");
+    const boxesJson = formData.get("boxes");
 
     if (!file) {
-      return NextResponse.json(
-        { error: "pdf file is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "pdf file is required" }, { status: 400 });
     }
 
     if (!boxesJson) {
-      return NextResponse.json(
-        { error: "boxes payload is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "boxes payload is required" }, { status: 400 });
     }
 
-    // Bug fix #4: wrap JSON.parse in try/catch to handle malformed payloads gracefully
-    let boxes: BoxInput[];
+    // Safely parse boxes JSON
+    let boxes;
     try {
-      boxes = JSON.parse(boxesJson) as BoxInput[];
+      boxes = JSON.parse(boxesJson);
     } catch {
       return NextResponse.json(
         { error: "boxes payload is not valid JSON" },
@@ -70,11 +54,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (
-      !boxes.some(
-        (b) => b.fieldType === "signature" && b.signature && b.signature.length
-      )
-    ) {
+    if (!boxes.some((b) => b.fieldType === "signature" && b.signature && b.signature.length)) {
       return NextResponse.json(
         { error: "at least one signature is required" },
         { status: 400 }
@@ -90,9 +70,8 @@ export async function POST(req: NextRequest) {
 
     const pdfDoc = await PDFDocument.load(originalBuffer);
 
-    // Bug fix #5: use getPage(0) but note only page 0 is supported; log a warning if boxes
-    // reference a multi-page document. A proper multi-page implementation would require the
-    // client to pass a page index per box — kept as page 0 with a clear comment.
+    // NOTE: Only page 0 is supported. Multi-page support requires
+    // the client to pass a page index per box field.
     const page = pdfDoc.getPage(0);
     const pageWidth = page.getWidth();
     const pageHeight = page.getHeight();
@@ -102,10 +81,9 @@ export async function POST(req: NextRequest) {
       const boxWidth = box.wPercent * pageWidth;
       const boxHeight = box.hPercent * pageHeight;
 
-      // Convert from top-left percentage coordinates to pdf-lib's bottom-left origin
+      // Convert top-left percentage coordinates → pdf-lib bottom-left origin
       const baseBoxX = box.xPercent * pageWidth;
       const boxTopFromTop = box.yPercent * pageHeight;
-      // Place the bottom-left corner of the box in PDF coordinate space
       const baseBoxY = pageHeight - boxTopFromTop - boxHeight;
 
       // SIGNATURE / IMAGE
@@ -123,35 +101,22 @@ export async function POST(req: NextRequest) {
           img = await pdfDoc.embedPng(imgBytes);
         }
 
-        const imgWidth = img.width;
-        const imgHeight = img.height;
-        const scale = Math.min(boxWidth / imgWidth, boxHeight / imgHeight);
+        const scale = Math.min(boxWidth / img.width, boxHeight / img.height);
+        const drawWidth = img.width * scale;
+        const drawHeight = img.height * scale;
 
-        const drawWidth = imgWidth * scale;
-        const drawHeight = imgHeight * scale;
-
-        // Center the image within the box
+        // Center within box
         const drawX = baseBoxX + (boxWidth - drawWidth) / 2;
         const drawY = baseBoxY + (boxHeight - drawHeight) / 2;
 
-        page.drawImage(img, {
-          x: drawX,
-          y: drawY,
-          width: drawWidth,
-          height: drawHeight,
-        });
+        page.drawImage(img, { x: drawX, y: drawY, width: drawWidth, height: drawHeight });
       }
-      // TEXT / DATE
-      // Bug fix #10: removed the erroneous +boxWidth*0.3 horizontal offset
-      // Bug fix #11: use baseBoxY directly instead of fragile -boxHeight*0.95 offset
-      else if (
-        (box.fieldType === "text" || box.fieldType === "date") &&
-        box.value
-      ) {
-        const fontSize = Math.min(12, boxHeight * 0.6); // scale font to box height
 
-        const textX = baseBoxX + 4; // small left padding
-        const textY = baseBoxY + (boxHeight - fontSize) / 2; // vertically centered
+      // TEXT / DATE
+      else if ((box.fieldType === "text" || box.fieldType === "date") && box.value) {
+        const fontSize = Math.min(12, boxHeight * 0.6);
+        const textX = baseBoxX + 4;
+        const textY = baseBoxY + (boxHeight - fontSize) / 2;
 
         page.drawText(box.value, {
           x: textX,
@@ -161,6 +126,7 @@ export async function POST(req: NextRequest) {
           color: rgb(0, 0, 0),
         });
       }
+
       // RADIO
       else if (box.fieldType === "radio") {
         const radius = Math.min(boxWidth, boxHeight) / 2.5;
@@ -175,7 +141,6 @@ export async function POST(req: NextRequest) {
           borderColor: rgb(0, 0, 0),
         });
 
-        // Fill the radio if the value was "checked"
         if (box.value === "checked") {
           page.drawCircle({
             x: centerX,
@@ -200,15 +165,11 @@ export async function POST(req: NextRequest) {
     try {
       await connectDB();
       if (isConnected) {
-        await AuditLog.create({
-          pdfId,
-          originalHash,
-          signedHash,
-        });
+        await AuditLog.create({ pdfId, originalHash, signedHash });
       }
     } catch (dbErr) {
       console.error("Failed to save audit log:", dbErr);
-      // Non-fatal: continue even if DB logging fails
+      // Non-fatal — continue even if DB logging fails
     }
 
     return new NextResponse(signedBuffer, {
@@ -223,9 +184,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("ERROR in /api/sign-pdf:", err);
-    return NextResponse.json(
-      { error: "something went wrong" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "something went wrong" }, { status: 500 });
   }
 }

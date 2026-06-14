@@ -3,18 +3,12 @@
 import SignatureCanvas from "react-signature-canvas";
 import { useRef } from "react";
 
-type Props = {
-  onSave: (data: string) => void;
-  onCancel: () => void;
-};
-
-function SignaturePopup({ onSave, onCancel }: Props) {
-  const ref = useRef<SignatureCanvas | null>(null);
+export default function SignaturePopup({ onSave, onCancel }) {
+  const ref = useRef(null);
 
   function handleSave() {
     if (!ref.current) return;
 
-    // Bug fix #3: Guard against saving a blank (empty) canvas
     if (ref.current.isEmpty()) {
       alert("Please draw your signature before saving.");
       return;
@@ -47,7 +41,6 @@ function SignaturePopup({ onSave, onCancel }: Props) {
           boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
         }}
       >
-        {/* Enhancement #19: Title label */}
         <p
           style={{
             margin: 0,
@@ -117,5 +110,3 @@ function SignaturePopup({ onSave, onCancel }: Props) {
     </div>
   );
 }
-
-export default SignaturePopup;
