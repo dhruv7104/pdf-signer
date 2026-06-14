@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import SignaturePopup from "../components/SignaturePopup";
 
+
 // ---------------------------------------------------------------------------
 // pdfjs-dist singleton loader
 // ---------------------------------------------------------------------------
@@ -60,10 +61,12 @@ export default function PdfViewer() {
   const [isSigning, setIsSigning]       = useState(false);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
 
-  const pdfAreaRef   = useRef(null);
-  const pdfCanvasRef = useRef(null);
+  const pdfAreaRef      = useRef(null);
+  const pdfCanvasRef    = useRef(null);
   const draggingBoxIdRef = useRef(null);
   const dragOffsetRef    = useRef({ x: 0, y: 0 });
+  // Store the file to render — read by useEffect after DOM commit
+  const pendingRenderRef = useRef(null);
 
   // ---------------------------------------------------------------------------
   // PDF rendering — canvas gives exact aspect ratio for 1:1 coordinate mapping
@@ -71,7 +74,10 @@ export default function PdfViewer() {
   async function renderPdfToCanvas(file) {
     const canvas    = pdfCanvasRef.current;
     const container = pdfAreaRef.current;
-    if (!canvas || !container) return;
+    if (!canvas || !container) {
+      console.error("Canvas or container ref is null — cannot render PDF");
+      return;
+    }
 
     setIsLoadingPdf(true);
     try {
@@ -80,6 +86,7 @@ export default function PdfViewer() {
       const pdfDoc      = await lib.getDocument({ data: arrayBuffer }).promise;
       const page        = await pdfDoc.getPage(1);
 
+      // clientWidth is 0 when display:none; fall back to 800px
       const containerWidth = container.clientWidth || 800;
       const baseViewport   = page.getViewport({ scale: 1 });
       const scale          = (containerWidth / baseViewport.width) * 2;
@@ -101,6 +108,17 @@ export default function PdfViewer() {
     }
   }
 
+  // Fire renderPdfToCanvas AFTER React has committed the DOM update
+  // (so canvas refs are guaranteed to be mounted)
+  useEffect(() => {
+    if (pendingRenderRef.current) {
+      const file = pendingRenderRef.current;
+      pendingRenderRef.current = null;
+      renderPdfToCanvas(file);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pdfFile]);
+
   // ---------------------------------------------------------------------------
   // File upload
   // ---------------------------------------------------------------------------
@@ -113,12 +131,15 @@ export default function PdfViewer() {
       if (canvas) { canvas.width = 0; canvas.height = 0; }
       return;
     }
+    // Store file in ref BEFORE calling setPdfFile.
+    // useEffect watches pdfFile and fires renderPdfToCanvas after DOM commits,
+    // ensuring canvas refs are valid.
+    pendingRenderRef.current = file;
     setPdfFile(file);
     setFileName(file.name);
     setHasPdf(false);
     setBoxes([]);
     setOriginalHash(null); setSignedHash(null); setPdfId(null);
-    renderPdfToCanvas(file);
   }
 
   // ---------------------------------------------------------------------------
@@ -448,15 +469,16 @@ export default function PdfViewer() {
         )}
 
         {/* ── PDF canvas + overlay ──────────────────────────── */}
-        {pdfFile && (
-          <div style={{
-            background: C.surface,
-            border: `1px solid ${C.border}`,
-            borderRadius: "8px",
-            overflow: "hidden",
-            boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-            display: isLoadingPdf ? "none" : "block",
-          }}>
+        {/* Always in DOM so refs (pdfAreaRef, pdfCanvasRef) are never null.
+            Visibility toggled via display instead of conditional rendering. */}
+        <div style={{
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: "8px",
+          overflow: "hidden",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+          display: pdfFile && !isLoadingPdf ? "block" : "none",
+        }}>
             <div ref={pdfAreaRef} style={{ position: "relative", width: "100%" }}>
               {/* PDF canvas — width:100%/height:auto preserves true PDF aspect ratio */}
               <canvas
@@ -536,8 +558,7 @@ export default function PdfViewer() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+        </div>
 
         {/* ── Audit hashes ──────────────────────────────────── */}
         {(originalHash || signedHash || pdfId) && (
