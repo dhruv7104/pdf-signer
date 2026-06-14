@@ -595,6 +595,19 @@ export default function PdfViewer() {
           </div>
         )}
       </main>
+
+      {/* Signature drawing popup — position:fixed so it overlays everything */}
+      {activeBoxId !== null && (
+        <SignaturePopup
+          onSave={(img) => {
+            setBoxes((old) =>
+              old.map((b) => (b.id === activeBoxId ? { ...b, signature: img } : b))
+            );
+            setActiveBoxId(null);
+          }}
+          onCancel={() => setActiveBoxId(null)}
+        />
+      )}
     </div>
   );
 }
