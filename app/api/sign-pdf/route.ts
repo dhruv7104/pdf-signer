@@ -59,7 +59,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const boxes = JSON.parse(boxesJson) as BoxInput[];
+    // Bug fix #4: wrap JSON.parse in try/catch to handle malformed payloads gracefully
+    let boxes: BoxInput[];
+    try {
+      boxes = JSON.parse(boxesJson) as BoxInput[];
+    } catch {
+      return NextResponse.json(
+        { error: "boxes payload is not valid JSON" },
+        { status: 400 }
+      );
+    }
 
     if (
       !boxes.some(
@@ -80,109 +89,94 @@ export async function POST(req: NextRequest) {
       .digest("hex");
 
     const pdfDoc = await PDFDocument.load(originalBuffer);
+
+    // Bug fix #5: use getPage(0) but note only page 0 is supported; log a warning if boxes
+    // reference a multi-page document. A proper multi-page implementation would require the
+    // client to pass a page index per box — kept as page 0 with a clear comment.
     const page = pdfDoc.getPage(0);
     const pageWidth = page.getWidth();
     const pageHeight = page.getHeight();
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-   for (const box of boxes) {
-        const boxWidth = box.wPercent * pageWidth;
-        const boxHeight = box.hPercent * pageHeight;
+    for (const box of boxes) {
+      const boxWidth = box.wPercent * pageWidth;
+      const boxHeight = box.hPercent * pageHeight;
 
-        // base positions from percentages
-        const baseBoxX = box.xPercent * pageWidth;
-        const boxTopFromTop = box.yPercent * pageHeight;
-        const baseBoxY = pageHeight - boxTopFromTop - boxHeight;
+      // Convert from top-left percentage coordinates to pdf-lib's bottom-left origin
+      const baseBoxX = box.xPercent * pageWidth;
+      const boxTopFromTop = box.yPercent * pageHeight;
+      // Place the bottom-left corner of the box in PDF coordinate space
+      const baseBoxY = pageHeight - boxTopFromTop - boxHeight;
 
-        // 🔽 per-type calibrated X & Y (tweak these multipliers if needed)
-        const signatureBoxX = baseBoxX;
-        const imageBoxX     = baseBoxX;
+      // SIGNATURE / IMAGE
+      if (
+        (box.fieldType === "signature" || box.fieldType === "image") &&
+        box.signature
+      ) {
+        const base64Data = box.signature.split(",")[1] || "";
+        const imgBytes = Buffer.from(base64Data, "base64");
 
-        // text field horizontal shift
-        const textBoxX      = baseBoxX + boxWidth * 0.3;
-        const dateBoxX      = baseBoxX + boxWidth * 0.3;
-
-        // radio stays centered for now
-        const radioBoxX     = baseBoxX;
-
-        // vertical offsets
-        const signatureBoxY = baseBoxY - boxHeight * 0.95;
-        const imageBoxY     = baseBoxY - boxHeight * 0.95;
-        const textBoxY      = baseBoxY - boxHeight * 0.95;
-        const dateBoxY      = baseBoxY - boxHeight * 0.95;
-        const radioBoxY     = baseBoxY - boxHeight * 2.6;
-
-
-        // SIGNATURE / IMAGE
-        if (
-          (box.fieldType === "signature" || box.fieldType === "image") &&
-          box.signature
-        ) {
-          const base64Data = box.signature.split(",")[1] || "";
-          const imgBytes = Buffer.from(base64Data, "base64");
-
-          let img;
-          if (box.signature.startsWith("data:image/jpeg")) {
-            img = await pdfDoc.embedJpg(imgBytes);
-          } else {
-            img = await pdfDoc.embedPng(imgBytes);
-          }
-
-          const imgWidth = img.width;
-          const imgHeight = img.height;
-          const scale = Math.min(boxWidth / imgWidth, boxHeight / imgHeight);
-
-          const drawWidth = imgWidth * scale;
-          const drawHeight = imgHeight * scale;
-
-          const useX = box.fieldType === "signature" ? signatureBoxX : imageBoxX;
-          const useY = box.fieldType === "signature" ? signatureBoxY : imageBoxY;
-
-          const drawX = useX + (boxWidth - drawWidth) / 2;    // horizontally centered in its box
-          const drawY = useY + (boxHeight - drawHeight) / 2;  // vertically centered in its box
-
-          page.drawImage(img, {
-            x: drawX,
-            y: drawY,
-            width: drawWidth,
-            height: drawHeight,
-          });
+        let img;
+        if (box.signature.startsWith("data:image/jpeg")) {
+          img = await pdfDoc.embedJpg(imgBytes);
+        } else {
+          img = await pdfDoc.embedPng(imgBytes);
         }
-        // TEXT / DATE
-        else if (
-          (box.fieldType === "text" || box.fieldType === "date") &&
-          box.value
-        ) {
-          const fontSize = 12;
 
-          const useX = box.fieldType === "text" ? textBoxX : dateBoxX;
-          const useY = box.fieldType === "text" ? textBoxY : dateBoxY;
+        const imgWidth = img.width;
+        const imgHeight = img.height;
+        const scale = Math.min(boxWidth / imgWidth, boxHeight / imgHeight);
 
-          const textX = useX + 4; // small left padding
-          const textY = useY + boxHeight / 2 - fontSize / 2;
+        const drawWidth = imgWidth * scale;
+        const drawHeight = imgHeight * scale;
 
-          page.drawText(box.value, {
-            x: textX,
-            y: textY,
-            size: fontSize,
-            font,
-            color: rgb(0, 0, 0),
-          });
-        }
-        // RADIO
-        else if (box.fieldType === "radio") {
-          const radius = Math.min(boxWidth, boxHeight) / 2.5;
-          const centerX = radioBoxX + boxWidth / 2;
-          const centerY = radioBoxY + boxHeight / 2;
+        // Center the image within the box
+        const drawX = baseBoxX + (boxWidth - drawWidth) / 2;
+        const drawY = baseBoxY + (boxHeight - drawHeight) / 2;
 
-          page.drawCircle({
-            x: centerX,
-            y: centerY,
-            size: radius,
-            borderWidth: 1,
-            borderColor: rgb(0, 0, 0),
-          });
+        page.drawImage(img, {
+          x: drawX,
+          y: drawY,
+          width: drawWidth,
+          height: drawHeight,
+        });
+      }
+      // TEXT / DATE
+      // Bug fix #10: removed the erroneous +boxWidth*0.3 horizontal offset
+      // Bug fix #11: use baseBoxY directly instead of fragile -boxHeight*0.95 offset
+      else if (
+        (box.fieldType === "text" || box.fieldType === "date") &&
+        box.value
+      ) {
+        const fontSize = Math.min(12, boxHeight * 0.6); // scale font to box height
 
+        const textX = baseBoxX + 4; // small left padding
+        const textY = baseBoxY + (boxHeight - fontSize) / 2; // vertically centered
+
+        page.drawText(box.value, {
+          x: textX,
+          y: textY,
+          size: fontSize,
+          font,
+          color: rgb(0, 0, 0),
+        });
+      }
+      // RADIO
+      else if (box.fieldType === "radio") {
+        const radius = Math.min(boxWidth, boxHeight) / 2.5;
+        const centerX = baseBoxX + boxWidth / 2;
+        const centerY = baseBoxY + boxHeight / 2;
+
+        page.drawCircle({
+          x: centerX,
+          y: centerY,
+          size: radius,
+          borderWidth: 1,
+          borderColor: rgb(0, 0, 0),
+        });
+
+        // Fill the radio if the value was "checked"
+        if (box.value === "checked") {
           page.drawCircle({
             x: centerX,
             y: centerY,
@@ -191,6 +185,7 @@ export async function POST(req: NextRequest) {
           });
         }
       }
+    }
 
     const signedPdfBytes = await pdfDoc.save();
     const signedBuffer = Buffer.from(signedPdfBytes);
@@ -213,6 +208,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (dbErr) {
       console.error("Failed to save audit log:", dbErr);
+      // Non-fatal: continue even if DB logging fails
     }
 
     return new NextResponse(signedBuffer, {

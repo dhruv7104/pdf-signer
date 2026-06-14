@@ -20,6 +20,14 @@ type Box = {
   value?: string;            // text/date value
 };
 
+const FIELD_LABELS: Record<Box["fieldType"], string> = {
+  signature: "Signature",
+  text: "Text",
+  image: "Image",
+  date: "Date",
+  radio: "Radio",
+};
+
 const buttonStyle: React.CSSProperties = {
   padding: "6px 12px",
   borderRadius: "4px",
@@ -27,6 +35,7 @@ const buttonStyle: React.CSSProperties = {
   background: "#2563eb",
   color: "white",
   cursor: "pointer",
+  fontSize: "13px",
 };
 
 function PdfViewer() {
@@ -38,6 +47,9 @@ function PdfViewer() {
   const [originalHash, setOriginalHash] = useState<string | null>(null);
   const [signedHash, setSignedHash] = useState<string | null>(null);
   const [pdfId, setPdfId] = useState<string | null>(null);
+
+  // Enhancement #18: loading state while signing
+  const [isSigning, setIsSigning] = useState(false);
 
   const pdfAreaRef = useRef<HTMLDivElement | null>(null);
   const draggingBoxIdRef = useRef<number | null>(null);
@@ -85,8 +97,9 @@ function PdfViewer() {
     setBoxes((old) => [...old, base]);
   }
 
-  function handleAddSignatureBox() {
-    addFieldBox("signature");
+  // Enhancement #16: delete a box
+  function deleteBox(id: number) {
+    setBoxes((old) => old.filter((b) => b.id !== id));
   }
 
   function handleBoxMouseDown(
@@ -119,24 +132,34 @@ function PdfViewer() {
 
       const areaRect = pdfAreaRef.current.getBoundingClientRect();
 
-      let newLeftPx = e.clientX - areaRect.left - dragOffsetRef.current.x;
-      let newTopPx = e.clientY - areaRect.top - dragOffsetRef.current.y;
+      // Bug fix #2: find the box to get its width/height for correct clamping
+      setBoxes((old) => {
+        const box = old.find((b) => b.id === activeId);
+        if (!box) return old;
 
-      if (newLeftPx < 0) newLeftPx = 0;
-      if (newTopPx < 0) newTopPx = 0;
-      if (newLeftPx > areaRect.width) newLeftPx = areaRect.width;
-      if (newTopPx > areaRect.height) newTopPx = areaRect.height;
+        const boxWidthPx = box.wPercent * areaRect.width;
+        const boxHeightPx = box.hPercent * areaRect.height;
 
-      const newXPercent = newLeftPx / areaRect.width;
-      const newYPercent = newTopPx / areaRect.height;
+        let newLeftPx = e.clientX - areaRect.left - dragOffsetRef.current.x;
+        let newTopPx = e.clientY - areaRect.top - dragOffsetRef.current.y;
 
-      setBoxes((old) =>
-        old.map((b) =>
+        // Clamp so the box never leaves the PDF area
+        if (newLeftPx < 0) newLeftPx = 0;
+        if (newTopPx < 0) newTopPx = 0;
+        if (newLeftPx > areaRect.width - boxWidthPx)
+          newLeftPx = areaRect.width - boxWidthPx;
+        if (newTopPx > areaRect.height - boxHeightPx)
+          newTopPx = areaRect.height - boxHeightPx;
+
+        const newXPercent = newLeftPx / areaRect.width;
+        const newYPercent = newTopPx / areaRect.height;
+
+        return old.map((b) =>
           b.id === activeId
             ? { ...b, xPercent: newXPercent, yPercent: newYPercent }
             : b
-        )
-      );
+        );
+      });
     }
 
     function handleMouseUp() {
@@ -185,11 +208,23 @@ function PdfViewer() {
 
     form.append("boxes", JSON.stringify(serializableBoxes));
 
+    setIsSigning(true);
     try {
       const res = await fetch("/api/sign-pdf", {
         method: "POST",
         body: form,
       });
+
+      // Bug fix #1: only read and store hashes when the request succeeded
+      if (!res.ok) {
+        try {
+          const data = await res.json();
+          alert(`Failed to sign PDF: ${data.error || res.statusText}`);
+        } catch {
+          alert(`Failed to sign PDF: ${res.status}`);
+        }
+        return;
+      }
 
       const original = res.headers.get("x-original-hash");
       const signed = res.headers.get("x-signed-hash");
@@ -198,16 +233,6 @@ function PdfViewer() {
       setOriginalHash(original);
       setSignedHash(signed);
       setPdfId(id);
-
-      if (!res.ok) {
-        try {
-          const data = await res.json();
-          alert(`Failed to sign pdf: ${data.error || res.statusText}`);
-        } catch {
-          alert(`Failed to sign pdf: ${res.status}`);
-        }
-        return;
-      }
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -221,6 +246,8 @@ function PdfViewer() {
     } catch (err) {
       console.error("Fetch error:", err);
       alert("Could not connect to backend");
+    } finally {
+      setIsSigning(false);
     }
   }
 
@@ -249,7 +276,7 @@ function PdfViewer() {
       >
         <input type="file" accept="application/pdf" onChange={handleFileChange} />
 
-        <button onClick={handleAddSignatureBox} style={buttonStyle}>
+        <button onClick={() => addFieldBox("signature")} style={buttonStyle}>
           Signature Field
         </button>
 
@@ -271,16 +298,18 @@ function PdfViewer() {
 
         <button
           onClick={handleDownloadSigned}
+          disabled={isSigning}
           style={{
             padding: "6px 12px",
             borderRadius: "4px",
             border: "none",
-            background: "#16a34a",
+            background: isSigning ? "#86efac" : "#16a34a",
             color: "white",
-            cursor: "pointer",
+            cursor: isSigning ? "not-allowed" : "pointer",
+            fontSize: "13px",
           }}
         >
-          Download Signed PDF
+          {isSigning ? "Signing…" : "Download Signed PDF"}
         </button>
       </div>
 
@@ -348,7 +377,7 @@ function PdfViewer() {
           >
             <iframe
               src={`${pdfLink}#toolbar=0&navpanes=0&scrollbar=0`}
-              title="PDF"
+              title="PDF Preview"
               style={{
                 width: "100%",
                 height: "100%",
@@ -373,11 +402,16 @@ function PdfViewer() {
                       );
                     }
                   } else if (box.fieldType === "date") {
+                    // Bug fix #9: validate date format before saving
                     const val = prompt(
                       "Enter date (YYYY-MM-DD):",
-                      box.value || ""
+                      box.value || new Date().toISOString().split("T")[0]
                     );
                     if (val !== null) {
+                      if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+                        alert("Invalid date format. Please use YYYY-MM-DD.");
+                        return;
+                      }
                       setBoxes((old) =>
                         old.map((b) =>
                           b.id === box.id ? { ...b, value: val } : b
@@ -388,9 +422,13 @@ function PdfViewer() {
                     const input = document.createElement("input");
                     input.type = "file";
                     input.accept = "image/*";
+                    input.style.display = "none";
+                    // Bug fix #14: append to DOM before clicking (Safari/Firefox compat)
+                    document.body.appendChild(input);
                     input.onchange = (event) => {
                       const target = event.target as HTMLInputElement;
                       const file = target.files && target.files[0];
+                      document.body.removeChild(input);
                       if (!file) return;
 
                       const reader = new FileReader();
@@ -407,7 +445,14 @@ function PdfViewer() {
                     };
                     input.click();
                   } else if (box.fieldType === "radio") {
-                    alert("Radio field clicked");
+                    // Toggle radio value on double-click
+                    setBoxes((old) =>
+                      old.map((b) =>
+                        b.id === box.id
+                          ? { ...b, value: b.value === "checked" ? "" : "checked" }
+                          : b
+                      )
+                    );
                   }
                 }}
                 style={{
@@ -426,12 +471,46 @@ function PdfViewer() {
                   fontWeight: "bold",
                   cursor: "move",
                   userSelect: "none",
+                  boxSizing: "border-box",
                 }}
               >
+                {/* Enhancement #16: delete button on each box */}
+                <button
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteBox(box.id);
+                  }}
+                  title="Remove field"
+                  style={{
+                    position: "absolute",
+                    top: -10,
+                    right: -10,
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    background: "#ef4444",
+                    color: "white",
+                    border: "none",
+                    cursor: "pointer",
+                    fontSize: "10px",
+                    lineHeight: "18px",
+                    textAlign: "center",
+                    padding: 0,
+                    zIndex: 10,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  ×
+                </button>
+
                 {box.fieldType === "signature" &&
                   (box.signature ? (
                     <img
                       src={box.signature}
+                      alt="Signature"
                       style={{
                         width: "100%",
                         height: "100%",
@@ -439,21 +518,29 @@ function PdfViewer() {
                       }}
                     />
                   ) : (
-                    "Signature"
+                    // Enhancement #17: field type label
+                    <span style={{ color: "#6b7280", pointerEvents: "none" }}>
+                      {FIELD_LABELS.signature}
+                    </span>
                   ))}
 
                 {box.fieldType === "text" && (
-                  <span>{box.value || "Text"}</span>
+                  <span style={{ color: box.value ? "#111827" : "#6b7280", pointerEvents: "none" }}>
+                    {box.value || FIELD_LABELS.text}
+                  </span>
                 )}
 
                 {box.fieldType === "date" && (
-                  <span>{box.value || "Date"}</span>
+                  <span style={{ color: box.value ? "#111827" : "#6b7280", pointerEvents: "none" }}>
+                    {box.value || FIELD_LABELS.date}
+                  </span>
                 )}
 
                 {box.fieldType === "image" &&
                   (box.signature ? (
                     <img
                       src={box.signature}
+                      alt="Image"
                       style={{
                         width: "100%",
                         height: "100%",
@@ -461,7 +548,9 @@ function PdfViewer() {
                       }}
                     />
                   ) : (
-                    "Image"
+                    <span style={{ color: "#6b7280", pointerEvents: "none" }}>
+                      {FIELD_LABELS.image}
+                    </span>
                   ))}
 
                 {box.fieldType === "radio" && (
@@ -471,8 +560,10 @@ function PdfViewer() {
                       height: "14px",
                       borderRadius: "50%",
                       border: "2px solid #000",
+                      background: box.value === "checked" ? "#000" : "transparent",
+                      pointerEvents: "none",
                     }}
-                  ></div>
+                  />
                 )}
               </div>
             ))}
