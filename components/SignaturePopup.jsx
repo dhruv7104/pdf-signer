@@ -8,102 +8,85 @@ export default function SignaturePopup({ onSave, onCancel }) {
 
   function handleSave() {
     if (!ref.current) return;
-
     if (ref.current.isEmpty()) {
       alert("Please draw your signature before saving.");
       return;
     }
-
-    const img = ref.current.getTrimmedCanvas().toDataURL("image/png");
-    onSave(img);
+    onSave(ref.current.getTrimmedCanvas().toDataURL("image/png"));
   }
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
-    >
-      <div
-        style={{
-          background: "white",
-          padding: 24,
-          borderRadius: 8,
-          display: "flex",
-          flexDirection: "column",
-          gap: 14,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
-        }}
-      >
-        <p
-          style={{
-            margin: 0,
-            fontWeight: 600,
-            fontSize: "16px",
-            textAlign: "center",
-            color: "#111827",
-          }}
-        >
-          Draw your signature
-        </p>
+    <div style={{
+      position: "fixed", inset: 0,
+      background: "rgba(0,0,0,0.35)",
+      backdropFilter: "blur(2px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1000,
+    }}>
+      <div style={{
+        background: "#ffffff",
+        border: "1px solid #e0e0e0",
+        borderRadius: "10px",
+        padding: "24px",
+        display: "flex", flexDirection: "column", gap: "16px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+        minWidth: "380px",
+      }}>
+        {/* Header */}
+        <div>
+          <p style={{ margin: 0, fontSize: "14px", fontWeight: "600", color: "#111111" }}>
+            Draw Signature
+          </p>
+          <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#888888" }}>
+            Use your mouse or trackpad to sign
+          </p>
+        </div>
 
-        <SignatureCanvas
-          ref={ref}
-          penColor="black"
-          canvasProps={{
-            width: 350,
-            height: 160,
-            style: { border: "1px solid #999", borderRadius: 4, display: "block" },
-          }}
-        />
+        {/* Canvas */}
+        <div style={{ border: "1px solid #e0e0e0", borderRadius: "6px", overflow: "hidden" }}>
+          <SignatureCanvas
+            ref={ref}
+            penColor="#111111"
+            canvasProps={{
+              width: 350,
+              height: 160,
+              style: { display: "block", background: "#fafafa" },
+            }}
+          />
+        </div>
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+        {/* Actions */}
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
           <button
             onClick={() => ref.current && ref.current.clear()}
             style={{
-              padding: "6px 16px",
-              background: "#6b7280",
-              color: "white",
-              borderRadius: 4,
-              border: "none",
-              cursor: "pointer",
+              padding: "6px 14px", borderRadius: "6px",
+              border: "1px solid #e0e0e0", background: "#ffffff",
+              color: "#555555", fontSize: "13px", cursor: "pointer",
             }}
           >
             Clear
           </button>
-
-          <button
-            onClick={handleSave}
-            style={{
-              padding: "6px 16px",
-              background: "#16a34a",
-              color: "white",
-              borderRadius: 4,
-              border: "none",
-              cursor: "pointer",
-            }}
-          >
-            Save
-          </button>
-
           <button
             onClick={onCancel}
             style={{
-              padding: "6px 16px",
-              background: "#dc2626",
-              color: "white",
-              borderRadius: 4,
-              border: "none",
-              cursor: "pointer",
+              padding: "6px 14px", borderRadius: "6px",
+              border: "1px solid #e0e0e0", background: "#ffffff",
+              color: "#555555", fontSize: "13px", cursor: "pointer",
             }}
           >
             Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            style={{
+              padding: "6px 16px", borderRadius: "6px",
+              border: "none", background: "#111111",
+              color: "#ffffff", fontSize: "13px",
+              fontWeight: "500", cursor: "pointer",
+            }}
+          >
+            Save Signature
           </button>
         </div>
       </div>

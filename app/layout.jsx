@@ -12,9 +12,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "BoloSign – PDF Signer",
-  description:
-    "Sign, annotate, and stamp PDFs with signatures, text, images, dates, and radio fields — all in your browser.",
+  title: "PDF Signer",
+  description: "Sign, annotate, and stamp PDFs — fast and in your browser.",
 };
 
 export default function RootLayout({ children }) {
