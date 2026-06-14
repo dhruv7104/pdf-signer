@@ -54,9 +54,18 @@ export async function POST(req) {
       );
     }
 
-    if (!boxes.some((b) => b.fieldType === "signature" && b.signature && b.signature.length)) {
+    // Require at least one box with actual content
+    const hasContent = boxes.some(
+      (b) =>
+        (b.fieldType === "signature" && b.signature?.length) ||
+        (b.fieldType === "image"     && b.signature?.length) ||
+        (b.fieldType === "text"      && b.value?.trim())     ||
+        (b.fieldType === "date"      && b.value?.trim())     ||
+        b.fieldType === "radio"
+    );
+    if (!hasContent) {
       return NextResponse.json(
-        { error: "at least one signature is required" },
+        { error: "at least one field with content is required" },
         { status: 400 }
       );
     }

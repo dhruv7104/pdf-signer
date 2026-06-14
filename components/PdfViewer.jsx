@@ -209,10 +209,21 @@ export default function PdfViewer() {
   // Download signed PDF
   // ---------------------------------------------------------------------------
   async function handleDownloadSigned() {
-    if (!pdfFile)          { alert("No PDF selected.");              return; }
-    if (boxes.length === 0) { alert("Add at least one field.");       return; }
-    if (!boxes.some((b) => b.fieldType === "signature" && b.signature)) {
-      alert("Please draw and save a signature field first."); return;
+    if (!pdfFile)           { alert("No PDF selected.");       return; }
+    if (boxes.length === 0) { alert("Add at least one field."); return; }
+
+    // Require at least one field that actually has content
+    const hasContent = boxes.some(
+      (b) =>
+        (b.fieldType === "signature" && b.signature) ||
+        (b.fieldType === "image"     && b.signature) ||
+        (b.fieldType === "text"      && b.value)     ||
+        (b.fieldType === "date"      && b.value)     ||
+        b.fieldType === "radio"
+    );
+    if (!hasContent) {
+      alert("Please fill in at least one field before downloading.");
+      return;
     }
 
     const form = new FormData();
@@ -244,6 +255,8 @@ export default function PdfViewer() {
       a.href = url; a.download = "signed.pdf";
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
+      // Brief success message
+      setTimeout(() => alert("✅ signed.pdf downloaded successfully!"), 100);
     } catch (err) {
       console.error(err);
       alert("Could not connect to backend.");
@@ -475,7 +488,7 @@ export default function PdfViewer() {
           background: C.surface,
           border: `1px solid ${C.border}`,
           borderRadius: "8px",
-          overflow: "hidden",
+          overflow: "visible",   /* must be visible so delete buttons outside boxes aren't clipped */
           boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
           display: pdfFile && !isLoadingPdf ? "block" : "none",
         }}>
@@ -510,19 +523,20 @@ export default function PdfViewer() {
                     boxSizing: "border-box",
                   }}
                 >
-                  {/* Delete button */}
+                  {/* Delete button — inside the box at top-right so overflow:visible isn't needed */}
                   <button
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => { e.stopPropagation(); deleteBox(box.id); }}
                     title="Remove field"
                     style={{
-                      position: "absolute", top: -8, right: -8,
+                      position: "absolute", top: 3, right: 3,
                       width: 16, height: 16, borderRadius: "50%",
-                      background: "#555", color: "#fff",
+                      background: "rgba(80,80,80,0.75)", color: "#fff",
                       border: "none", cursor: "pointer",
-                      fontSize: "10px", lineHeight: "16px",
+                      fontSize: "11px",
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      zIndex: 10, padding: 0,
+                      zIndex: 10, padding: 0, lineHeight: 1,
+                      flexShrink: 0,
                     }}
                   >×</button>
 
