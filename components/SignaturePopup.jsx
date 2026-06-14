@@ -3,17 +3,17 @@
 import { useRef, useEffect } from "react";
 
 export default function SignaturePopup({ onSave, onCancel }) {
-  const canvasRef  = useRef(null);
-  const isDrawing  = useRef(false);
-  const lastPos    = useRef(null);
+  const canvasRef = useRef(null);
+  const isDrawing = useRef(false);
+  const lastPos   = useRef(null);
 
-  // Fill canvas with background colour on mount
+  // Do NOT fill the canvas on mount — leave it fully transparent so the
+  // exported PNG has no background. The light colour you see is CSS-only.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#fafafa";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height); // ensure blank slate
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -32,14 +32,14 @@ export default function SignaturePopup({ onSave, onCancel }) {
     };
   }
 
+  // Check alpha channel — any pixel with alpha > 10 means ink was drawn
   function isEmpty() {
     const canvas = canvasRef.current;
     if (!canvas) return true;
     const { data } = canvas.getContext("2d")
       .getImageData(0, 0, canvas.width, canvas.height);
-    // Any pixel darker than background (#fafafa = 250,250,250) means drawn
-    for (let i = 0; i < data.length; i += 4) {
-      if (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240) return false;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 10) return false;
     }
     return true;
   }
@@ -77,12 +77,11 @@ export default function SignaturePopup({ onSave, onCancel }) {
     lastPos.current   = null;
   }
 
+  // Clear uses clearRect so it resets to fully transparent (not opaque fill)
   function clearCanvas() {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#fafafa";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
   }
 
   function handleSave() {
@@ -90,6 +89,7 @@ export default function SignaturePopup({ onSave, onCancel }) {
       alert("Please draw your signature before saving.");
       return;
     }
+    // toDataURL("image/png") encodes transparency — no background in PDF
     onSave(canvasRef.current.toDataURL("image/png"));
   }
 
@@ -123,7 +123,9 @@ export default function SignaturePopup({ onSave, onCancel }) {
           </p>
         </div>
 
-        {/* Drawing canvas */}
+        {/* Drawing canvas
+            background is CSS-only (visual only, doesn't affect exported PNG).
+            The actual canvas pixels start transparent and only get ink added. */}
         <canvas
           ref={canvasRef}
           width={450}
@@ -141,9 +143,9 @@ export default function SignaturePopup({ onSave, onCancel }) {
             height: "auto",
             border: "1px solid #e0e0e0",
             borderRadius: "6px",
-            background: "#fafafa",
+            background: "#ffffff",   /* CSS visual only — does NOT affect toDataURL */
             cursor: "crosshair",
-            touchAction: "none",   // prevents page scroll while signing on mobile
+            touchAction: "none",
           }}
         />
 
